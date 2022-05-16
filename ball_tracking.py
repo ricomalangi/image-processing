@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # import the necessary packages
 import rospy
 from sensor_msgs.msg import Image
@@ -11,6 +12,12 @@ import imutils
 import time
 # construct the argument parse and parse the arguments
 def run_ball_tracking():
+    
+    rospy.init_node('position_tracker')
+    pub_position_tracker = rospy.Publisher('ball_position', Pose2D, queue_size=10)
+    pub_image = rospy.Publisher('data_image', Image, queue_size=10)
+    rate = rospy.Rate(10)
+
     ap = argparse.ArgumentParser()
     ap.add_argument("-v", "--video",
         help="path to the (optional) video file")
@@ -32,8 +39,9 @@ def run_ball_tracking():
         vs = cv2.VideoCapture(args["video"])
     # allow the camera or video file to warm up
     time.sleep(2.0)
+
     # keep looping
-    while True:
+    while not rospy.is_shutdown():
         # grab the current frame
         frame = vs.read()
         
@@ -57,8 +65,7 @@ def run_ball_tracking():
         mask = cv2.dilate(mask, None, iterations=2)
         # find contours in the mask and initialize the current
         # (x, y) center of the ball
-        cnts = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL,
-            cv2.CHAIN_APPROX_SIMPLE)
+        cnts = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         cnts = imutils.grab_contours(cnts)
         center = None
         # only proceed if at least one contour was found
@@ -94,14 +101,26 @@ def run_ball_tracking():
             # draw the connecting lines
             thickness = int(np.sqrt(args["buffer"] / float(i + 1)) * 2.5)
             cv2.line(frame, pts[i - 1], pts[i], (0, 0, 255), thickness)
-        # show the frame to our screen
         
-        cv2.imshow("Frame", frame)
-        key = cv2.waitKey(1) & 0xFF
+        data_position_tracker = Pose2D()
+        data_position_tracker.x = x
+        data_position_tracker.y = y
+        pub_position_tracker.publish(data_position_tracker)
+
+        data_image = Image()
+        data_image.data = frame
+        pub_image(data_image)
+
+        rate.sleep()
+
+        # show the frame to our screen
+        #cv2.imshow("Frame", frame)
+        #key = cv2.waitKey(1) & 0xFF
         # if the 'q' key is pressed, stop the loop
-        if key == ord("q"):
-            break
+        #if key == ord("q"):
+        #    break
     # if we are not using a video file, stop the camera video stream
+    
     if not args.get("video", False):
         vs.stop()
     # otherwise, release the camera
@@ -109,3 +128,10 @@ def run_ball_tracking():
         vs.release()
     # close all windows
     cv2.destroyAllWindows()
+
+if __name__ == '__main__':
+    try:
+        run_ball_tracking()
+    except rospy.ROSInterruptException:
+        pass
+
