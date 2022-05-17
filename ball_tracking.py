@@ -2,6 +2,7 @@
 # import the necessary packages
 import rospy
 from sensor_msgs.msg import Image
+from cv_bridge import CvBridge, CvBridgeError
 from geometry_msgs.msg import Pose2D
 from collections import deque
 from imutils.video import VideoStream
@@ -10,7 +11,20 @@ import argparse
 import cv2
 import imutils
 import time
+
 # construct the argument parse and parse the arguments
+ap = argparse.ArgumentParser()
+ap.add_argument("-v", "--video", help="path to the (optional) video file")
+ap.add_argument("-b", "--buffer", type=int, default=64, help="max buffer size")
+args = vars(ap.parse_args())
+# define the lower and upper boundaries of the "green"
+# ball in the HSV color space, then initialize the
+# list of tracked points
+orangeLower = (0, 100, 100)
+orangeUpper = (10, 255, 255)
+pts = deque(maxlen=args["buffer"])
+bridge = CvBridge()
+
 def run_ball_tracking():
     
     rospy.init_node('position_tracker')
@@ -18,18 +32,6 @@ def run_ball_tracking():
     pub_image = rospy.Publisher('data_image', Image, queue_size=10)
     rate = rospy.Rate(10)
 
-    ap = argparse.ArgumentParser()
-    ap.add_argument("-v", "--video",
-        help="path to the (optional) video file")
-    ap.add_argument("-b", "--buffer", type=int, default=64,
-        help="max buffer size")
-    args = vars(ap.parse_args())
-    # define the lower and upper boundaries of the "green"
-    # ball in the HSV color space, then initialize the
-    # list of tracked points
-    orangeLower = (0, 100, 100)
-    orangeUpper = (10, 255, 255)
-    pts = deque(maxlen=args["buffer"])
     # if a video path was not supplied, grab the reference
     # to the webcam
     if not args.get("video", False):
@@ -60,7 +62,7 @@ def run_ball_tracking():
         # a series of dilations and erosions to remove any small
         # blobs left in the mask
     
-        mask = cv2.inRange(hsv, blueLower, blueUpper)
+        mask = cv2.inRange(hsv, orangeLower, orangeUpper)
         mask = cv2.erode(mask, None, iterations=2)
         mask = cv2.dilate(mask, None, iterations=2)
         # find contours in the mask and initialize the current
@@ -77,6 +79,10 @@ def run_ball_tracking():
             ((x, y), radius) = cv2.minEnclosingCircle(c)
             M = cv2.moments(c)
             # find z position
+            data_position_tracker = Pose2D()
+            data_position_tracker.x = x
+            data_position_tracker.y = y
+            pub_position_tracker.publish(data_position_tracker)
             
             print(x,y)
             center = (int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"]))
@@ -102,23 +108,12 @@ def run_ball_tracking():
             thickness = int(np.sqrt(args["buffer"] / float(i + 1)) * 2.5)
             cv2.line(frame, pts[i - 1], pts[i], (0, 0, 255), thickness)
         
-        data_position_tracker = Pose2D()
-        data_position_tracker.x = x
-        data_position_tracker.y = y
-        pub_position_tracker.publish(data_position_tracker)
 
-        data_image = Image()
-        data_image.data = frame
-        pub_image(data_image)
+        data_image = bridge.cv2_to_imgmsg(frame, "bgr8")
+        pub_image.publish(data_image)
 
         rate.sleep()
 
-        # show the frame to our screen
-        #cv2.imshow("Frame", frame)
-        #key = cv2.waitKey(1) & 0xFF
-        # if the 'q' key is pressed, stop the loop
-        #if key == ord("q"):
-        #    break
     # if we are not using a video file, stop the camera video stream
     
     if not args.get("video", False):
